@@ -1,0 +1,18 @@
+---
+title: "Workshop notes"
+author: "Caitlin NM"
+format: html
+---
+
+# Generalized Linear Mixed Modeling Deep Dive: Selecting conditional distributions, checking assumptions, and drawing inference for ecological data
+
+Workshop Description:
+
+Drawing reliable and meaningful inference from generalized linear mixed models (GLMMs) of complex ecological systems is critical to the validity of many examples of ecological research. The literature available for building robust and statistically sound mixed effects models is vast but can be challenging to synthesize and apply consistently. The goal of this workshop is to provide guidance for ecologists building GLMMs with diverse data structures and study designs. This workshop will review how to develop GLMMs and rigorously check model assumptions to make reliable inference from model outputs. First, we will review how to fit a GLMM for various data types, fixed effects structures, random effects structures, conditional distributions, and link functions. Then, we will review how to assess model fit using hypothesis tests, residual checks, and graphical tools. Finally, we will focus on inferential tools to display and interpret modeling results. The workshop will provide a hands-on demonstration of how to handle these complex issues in the statistical programming language R. Participants are welcome to bring their own data for hands-on in-person support, or use provided example datasets. Participants should use laptops with an installed copy of R/RStudio (rstudio.com) and the glmmTMB and DHARMa packages.
+
+```{r}
+library(glmmTMB)
+library(DHARMa)
+#install.packages('TMB', type = 'source')
+```
+
