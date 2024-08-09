@@ -472,8 +472,8 @@ ggplot(meanVarY2Yr, aes(x=as.factor(WYear), y=varY2)) +
 # Script 2
 
 ```{r}
-install.packages("TMB", type='source')
-install.packages("glmmTMB", dependencies= TRUE)
+# install.packages("TMB", type='source')
+# install.packages("glmmTMB", dependencies= TRUE)
 ```
 
 
