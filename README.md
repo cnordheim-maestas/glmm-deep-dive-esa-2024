@@ -1,2 +1,3 @@
-# glmm-deep-dive-esa-2024
-ESA 2024 short course on glmms
+# ESA workshop
+
+https://gitlab.com/swejk12/esa-workshop​
