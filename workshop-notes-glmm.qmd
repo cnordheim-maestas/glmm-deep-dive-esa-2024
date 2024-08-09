@@ -8,13 +8,792 @@ format: html
 
 GitLab: https://gitlab.com/swejk12/esa-workshop
 
+Slides in pdf in repo: "GLMM_ESA_PARTICIPANT.pdf"
+
 Workshop Description:
 
 Drawing reliable and meaningful inference from generalized linear mixed models (GLMMs) of complex ecological systems is critical to the validity of many examples of ecological research. The literature available for building robust and statistically sound mixed effects models is vast but can be challenging to synthesize and apply consistently. The goal of this workshop is to provide guidance for ecologists building GLMMs with diverse data structures and study designs. This workshop will review how to develop GLMMs and rigorously check model assumptions to make reliable inference from model outputs. First, we will review how to fit a GLMM for various data types, fixed effects structures, random effects structures, conditional distributions, and link functions. Then, we will review how to assess model fit using hypothesis tests, residual checks, and graphical tools. Finally, we will focus on inferential tools to display and interpret modeling results. The workshop will provide a hands-on demonstration of how to handle these complex issues in the statistical programming language R. Participants are welcome to bring their own data for hands-on in-person support, or use provided example datasets. Participants should use laptops with an installed copy of R/RStudio (rstudio.com) and the glmmTMB and DHARMa packages.
 
+# Script 1
+
+
 ```{r}
+######################################################################################################
+# ESA 2024 GLMM Deep Dive
+#
+# Exercise 1: Identify Candidate Conditional Distributions of Response Variables and Link Functions
+#
+# Objective: Use graphical tools to determine candidate conditional distributions & potential structure for random & fixed effects
+###################################################################################################
+
+
+rm(list=ls())
+
+#################################
+# Load packages
+require(ggplot2)
+require(dplyr)
+library(here)
+
+
+## set your path ##
+# getwd()
+# path <- r'[C:\Analysis\glmm\Workshop_Aug_2024_ESA]'# Set your own path
+# dataPath <- file.path(path, "/Data_workshop")
+  
+#################################
+# Study 1 - Marine Debris - 
+#################################
+# Background on the data: 
+# Marine debris was weighed over time throughout a coastal area
+
+# Marine_debris <- readRDS(file.path(dataPath, "Marine_debris.rds"))
+Marine_debris <- readRDS(here("Data_workshop","Marine_debris.rds"))
+
+######################
+# Examine data
+######################
+
+# What type of response variable is debris?
+
+range(Marine_debris$debris) # 0.000 304.663
+table(Marine_debris$debris)
+
+# Type of data?
+# Continuous, Count, presence/absence, percentage....? 
+# continuous
+# We can use the flow chart in the presentation to help us decide what distributions we can consider.
+
+# Look at how distribution of data looks like:
+hist(Marine_debris$debris)
+# not normal
+
+# What type of distribution represents continuous data?
+# ________ & _________
+
+
+# zeros
+table(Marine_debris$debris==0)
+# FALSE  TRUE 
+# 28754    46 
+
+# This makes our life easy! gamma distribution represents data >0 so in this case tweedie would be our best choice
+
+# Lets explore the data a bit more to confirm and look at potential structures for random and fixed effects
+
+# boxplot - year
+plot(Marine_debris$Year, Marine_debris$debris)
+# variability between years looks inconsistent: meaning including random intercept for year might be a good to account to differences in dispersion by year
+
+# boxplot - site
+plot(Marine_debris$Site, Marine_debris$debris)
+# Here is clear that variation is not consistent between sites: including random site intercept might be good to account for differences in dispersion by site
+
+
+# look at the means by site
+# If we were interested in estimating effect for each site we could include it as fixed effect
+meanY <- aggregate(list(meanY=Marine_debris$debris), 
+                   list(Site=Marine_debris$Site),
+                   mean)
+
+plot(meanY[,1:2],
+     pch = 19,
+     ylab = 'mean(debris)',
+     xlab = 'Site')
+
+
+# look at the means by year
+meanYr <- aggregate(list(meanYr=Marine_debris$debris), 
+                    list(WYear=Marine_debris$WYear),
+                    mean)
+
+plot(meanYr[,1:2],
+     pch = 19,
+     ylab = 'mean(debris)',
+     xlab = 'WYear')
+lines(meanYr)
+# nice trend
+
+# tweedie uses log link to linearize the mean so lets check that:
+plot(log(meanYr[,1:2]),
+     pch = 19,
+     ylab = 'mean(debris)',
+     xlab = 'WYear')
+lines(log(meanYr))
+
+
+# Examine variance
+# For each distribution there is an assumed relationship between the mean and the variance.
+# We can use that relationship to help select our distribution.
+# Tweedie variance = mean^P  (P = power parameter between 1 and 2 )
+# gamma variance = mean*scale
+# we can use our data to do a rough scale calculation for gamma  & tweedie
+
+varY <- aggregate(list(varY=Marine_debris$debris), 
+                  list(Site=Marine_debris$Site),
+                  var)
+meanVar <- merge(meanY,varY)
+
+scaleY <- var(meanVar$varY)/mean(meanVar$meanY)
+
+ggplot(meanVar, aes(meanY, varY)) +
+  geom_smooth(method='lm', formula = y ~I(x*scaleY), se=F, aes(color='blue')) + 
+  geom_smooth(method='lm', formula = y ~ I(x^1.6) + offset(x) -1, se=F, aes(color='red')) + # you can play with different values for p (between 1 and 2) 
+  geom_point() +  
+  scale_color_identity(name = "Model fit",
+                       breaks = c("blue","red"),
+                       labels = c("gamma", "tweedie"),
+                       guide = "legend")
+
+
+# This further supports that Tweedie is likely the most suitable distribution
+
+                                          # THE END #
+
+
+
+#################################
+# Study 2 - Shrub Cover - 
+#################################
+# Background on the data: 
+# These data are from a sample of point-line transects. 
+# Each transect has 100 points at which a species of interest has a hit (1) or a miss (0)
+# The response variable Shrub is the number of hits for the transect at site i (shrub coverage)
+
+######################
+# load data
+######################
+
+#Shrub <- readRDS(file.path(dataPath, "Shrub.rds"))
+Shrub <- readRDS(here::here("Data_workshop","Shrub.rds"))
+
+
+######################
+# Examine data
+######################
+
+# What type of response variable is Shrub?
+
+range(Shrub$Shrub_cover) # 0 - 100.
+table(Shrub$Shrub_cover) # All integers.
+
+# Continuous, Count, presence/absence, percentage....?
+
+# Since we have presence/absence on the same site 100 times our response variable comes in percent
+
+# Look at distribution
+hist(Shrub$Shrub_cover)
+
+# What are distributions that represent percentages? Try to guess before moving forward:
+# __________ or _________________
+
+
+# Binomial data can either be modeled at the individual (binary response) or group (proportion) level.
+# The binomial distribution arises when n independent Bernoulli trials are conducted, 
+# each with the same probability of success p. 
+# The number of successes is a binomial(n, p) random variable.
+
+# The beta-binomial(n, α, β) distribution is  generated by choosing the probability p for a binomial(n, p) 
+#  distribution from a beta(α, β) distribution.
+
+# One major difference between a binomial and beta-binomial is that in a binomial distribution,
+# p is fixed for a set number of trials; in a beta-binomial, p is not fixed and changes from trial to trial.
+# Usually beta-binomial have higher dispersion than a binomial
+
+# Lets keep exploring the data:
+
+# A large number of zeroes may indicate that we need to use a zero-inflated model
+table(Shrub$Shrub_cover==0)
+# FALSE  TRUE 
+# 2396     4 
+
+# Now lets look at our data vs potential predictors, this will help us build the model later.
+# Looking at responses over predictors can guide us on what to input as random or fixed effects.
+
+
+# plot response variable as a function of Year
+ggplot(Shrub, aes(WYear, Shrub_cover)) +
+  geom_point(alpha = 0.05, position = position_jitter(height = 0.15)) +
+  ylab("Percent Cover") +
+  stat_smooth(method="loess", formula=y~x,
+              alpha=0.2, size=2)
+# Looks like Percent Cover increases over time, so if we are interested in looking at trend, time could be included as fixed effect to get an estimate.
+
+
+# box plot response variable as a function of Site
+ggplot(Shrub, aes(Site, Shrub_cover)) +
+  geom_boxplot() +
+  ylab("Percent Cover") 
+# There is high variability between sites. 
+# This suggests that Site might be a good variable to incorporate as random variable to account for heterogeneity between Sites.
+
+# rough trend for each site over the years.
+# just plotting a few so we can visualize
+  ggplot(Shrub[Shrub$Site%in% c(1:50),], aes(WYear, y=Shrub_cover/100, colour=Site )) +
+    geom_point() +
+    geom_smooth(
+      method="glm",
+      method.args=list(family=binomial(link='logit')),
+                        se = FALSE)
+
+# Just plotting a few we can see that each site varies in intercept but slopes are pretty similar
+# We would want to include random intercept for site and maybe check random slope for site as well when we are fitting the model
+  
+  
+# box plot response variable as a function of Year
+ggplot(Shrub, aes(Year, Shrub_cover)) +
+  geom_boxplot() +
+  ylab("Percent Cover") 
+# There is high variability between Years
+# Incorporating a random intercept for Year might be a good idea to account for heterogeneity between years
+# However this high variability could also indicate that this data could be fitted with a beta binomial which accounts for higher dispersion
+
+
+# lets look at the means #
+
+# means by site
+mean_cover <- aggregate(list(Shrub$Shrub_cover), 
+                        list(Site=Shrub$Site),
+                        mean)
+
+plot(mean_cover[,1:2],
+     pch = 19,
+     ylab = 'mean(Shrub_cover)',
+     xlab = 'Site')
+# we could try to include site as fixed effect however in this study we are interested in getting a coefficient per site, we want to look at an overall trend
+
+
+# means by Year
+mean_coverYr <- aggregate(list(mean_coverYr = Shrub$Shrub_cover), 
+                        list(WYear = Shrub$WYear),
+                        mean)
+
+plot(mean_coverYr[,1:2],
+     pch = 19,
+     ylab = 'mean(Shrub_cover)',
+     xlab = 'WYear')
+
+lines(mean_coverYr)
+# looks like positive trend over time again
+
+# Examine logit which is the log link for binomial and beta-binomial
+logit <- function(x) log(x/(1-x))
+
+plot(mean_coverYr$WYear, logit(mean_coverYr$mean_coverYr/100),
+     pch=19,
+     ylab='logit[mean(Shrub_cover)]',
+     xlab='WYear')  
+lines(mean_coverYr$WYear, logit(mean_coverYr$mean_coverYr/100))
+
+
+
+# What did we gather?
+# Percent cover data so could be binomial or beta-binomial
+# High variability between sites and years - potential for random intercepts for site and year
+# sites seem to have similar slope but different intercepts - potential for random slope for site
+# positive trend over time - could incorporate time as a fixed effect since we are interested in trend
+
+# Sometimes just by using data exploration we can't figure out the distribution and we need to fit the model 
+# and look at the residuals and coefficients
+# We will continue with this example during model selection in script 2
+
+# TO BE CONTINUED ......
+#########################################
+
+
+# NEXT EXERCISE #
+
+
+########################################
+# Study 3 - Live native shrub density 
+########################################
+# Background on the data: 
+# These data represent number of live native shrubs counted in 30 m^2 plots in two of the Channel Islands 
+# off the California Coast. We are interested in determining trends in live native shrub density over time
+# in the two Islands
+
+######################
+# load data
+######################
+
+Vegetation <- readRDS(here::here("Data_workshop","Vegetation.rds"))
+
+
+######################
+# Examine data
+######################
+
+# what type of response variable do we have? 
+Vegetation$Y
+range(Vegetation$Y) #0-26
+
+# What kind of data do we have? What are candidate distributions?
+# Continuous, Count, presence/absence, percentage....?
+# tweedie, nbinom or poisson
+
+# Response variable by site by year
+Sites <- sort(unique(Vegetation$Site))
+plot(jitter(Vegetation$WYear),Vegetation$Y,col=Vegetation$Site)
+for (i in 1:length(Sites)) lines(Vegetation$WYear[Vegetation$Site==Sites[i]],
+                                 Vegetation$Y[Vegetation$Site==Sites[i]],
+                                 col=i)
+# Are there any relationships?
+
+# Does it look like any distribution?                                                                                                                                                                                       
+ggplot(Vegetation, aes(x=Y, fill=Island)) +
+  geom_histogram(alpha=0.5, position="identity") +
+  facet_wrap(~Island)
+# Could be ____________, ________ or __________
+
+
+# zero inflated?
+table(Vegetation$Y==0)
+#could be ZI, there are lots of zeros
+
+# We could consider a zero inflated model, however zero inflated models should not be the first model to fit:
+# First the overall mean is low covariates might help account for 0s
+# Also certain distributions can account for a large number of zeros
+
+#########################################################
+# Look at the means of the response variable by SITE
+meanY2 <- Vegetation %>% group_by(Island,Site) %>% summarise(meanY2 =mean(Y))
+meanY2 
+
+ggplot(meanY2, aes(Site, meanY2, colour = Island)) + geom_point()
+# Looks like there are higher values for Island 2
+# if we want to compare islands, incorporating Island as fixed effect could be a good idea
+
+
+# We can get a feeling for what distribution might work best by plotting the mean and variance for each group level:
+# For Negative Binomial 1 Variance =  μ+σμ so for NB2 variance is quadratic function of the mean
+# For Negative Binomial 2 Variance =  μ+μ2/θ= μ+σμ2
+
+ 
+varY2 <- Vegetation %>% group_by(Island,Site) %>% summarise(varY2 = var(Y))
+meanVarY2 <- merge(meanY2,varY2)
+
+ggplot(meanVarY2, aes(meanY2, varY2)) + 
+  geom_smooth(method='lm', formula = y ~x -1, se=F, aes(color='blue')) + 
+  geom_smooth(method='lm', formula = y ~ I(x^2) + offset(x) -1, se=F, aes(color='red')) +
+  geom_abline(aes(intercept =0, slope=1, color='black')) +
+  geom_point() +  
+  facet_wrap(~Island) +
+  scale_color_identity(name = "Model fit",
+                       breaks = c("blue","red",'black'),
+                       labels = c("NB1", "NB2", "Poisson"),
+                       guide = "legend")
+
+# In the above plot, the black line represents the Poisson (one-to-one), 
+# the blue line represents the NB1 negative binomial parameterization,
+# and the red line represents the NB2 negative binomial parameterization.
+
+# could be NBINOM1 or NBINOM2, although looks a lot like nbinom2
+# looks like poisson is a bad fit
+
+#########################################################
+# look at the means by YEAR #
+meanY2Yr <- Vegetation %>% group_by(Island,WYear) %>% summarise(meanY2 =mean(Y))
+meanY2Yr
+
+ggplot(meanY2Yr, aes(WYear, meanY2, colour = Island)) + geom_point()+ geom_smooth(method = "lm",se = FALSE)
+
+
+# Examine log link
+ggplot(meanY2Yr, aes(WYear, log(meanY2), colour = Island)) + geom_point() + geom_smooth(method = "lm", se = FALSE)
+# we can see a trend over time, and a separate trend per Island
+
+# Examine variance again
+varY2Yr <- Vegetation %>% group_by(Island,WYear) %>% summarise(varY2 = var(Y))
+meanVarY2Yr <- merge(meanY2Yr,varY2Yr)
+
+ggplot(meanVarY2Yr, aes(meanY2, varY2)) + geom_smooth(method='lm', formula = y ~x -1, se=F, aes(color='blue')) + 
+  geom_smooth(method='lm', formula = y ~ I(x^2) + offset(x) -1, se=F, aes(color='red')) +
+  geom_abline(aes(intercept =0, slope=1, color='black')) +
+  geom_point(aes(shape=Island)) +  
+  scale_color_identity(name = "Model fit",
+                       breaks = c("blue","red",'black'),
+                       labels = c("NB1", "NB2", "Poisson"),
+                       guide = "legend") +
+  facet_wrap(~Island)
+
+# NBINOM2 is looking pretty good
+
+#########################################################
+# We can fit a quick linear regression to see response by Year
+# plot Y+1 so that 0's can be visualized
+ggplot(Vegetation, aes( WYear, log(Y+1), colour = Island)) +
+  geom_point(position = position_jitter(height = 0.4, width = 0)) +
+  geom_smooth(method = "lm")
+# what do we see? Variation in slope and intercept 
+
+# remove points to check trend
+ggplot(Vegetation, aes( WYear, log(Y+1), colour = Island)) +
+  geom_smooth(method = "lm")
+# (Y+1) to account for zeros 
+
+# we can fit a quick linear regression to see response by Site
+ggplot(Vegetation[Vegetation$Island==2,], aes( WYear, log(Y+1), colour = Site)) +
+  geom_point(position = position_jitter(height = 0.4, width = 0)) +
+  geom_smooth(method = "lm", se = FALSE)+
+  theme(legend.position = "none")
+# There is variation in intercept and slope over time for each site
+# There is variation in the trends by site, so a random slope for site
+
+# check variation by Island #
+
+# Variance uniformity across Islands? 
+ggplot(meanVarY2Yr, aes(x=Island, y=varY2)) +
+  geom_boxplot()
+# Difference in variance by Island?
+
+# Variance uniformity across Years? 
+ggplot(meanVarY2Yr, aes(x=as.factor(WYear), y=varY2)) +
+  geom_boxplot() 
+# Difference in the variance by year?
+
+# The information gathered from data exploration that we will take to model fitting:
+
+# Candidate distributions are: Negative Binomial 2 (most likely), although we might want to check Negative Binomial 1
+# We will use log link for this
+
+# Plotting Year and Site with the response variable we saw that:
+# We want to account for: 
+
+### Variation between years and Sites ###
+# Heterogeneity between Islands
+# Potential for random effects to account for these if we are not interested in estimating them #
+
+### Trend over time ###
+# Since we are interested in estimating trend, we might want to include it as fixed effect
+
+# To be continued............
+```
+
+# Script 2
+
+```{r}
+install.packages("TMB", type='source')
+install.packages("glmmTMB", dependencies= TRUE)
+```
+
+
+```{r}
+##############################################################
+# ESA 2024 GLMM Deep Dive Workshop
+#
+# Exercise 2 :Fit a GLMM
+#
+# Objective: Specify random and fixed effects structure appropriately
+##############################################################
+
+#rm(list=ls())
+
+##############################
+# Load packages
+#install.packages("glmmTMB")
 library(glmmTMB)
 library(DHARMa)
-#install.packages('TMB', type = 'source')
+library(tidyr)
+library(ggeffects)
+library(here)
+
+##############################
+# # Load Data
+# path <- r'[C:\Analysis\glmm\Workshop_Aug_2024_ESA]'
+# dataPath <- file.path(path, "Data_workshop")
+# 
+# Shrub <- readRDS(file.path(dataPath, "Shrub.rds"))
+
+Shrub <- readRDS(here("Data_workshop","Shrub.rds"))
+
+###############################
+# Specify and Fit the Full Model
+###############################
+
+# Reminder:
+# What we got from data exploration:
+# Families to try: Binomial & Beta-Binomial
+# We want to see if there is a trend over time
+# We want to account for Variation between years and Sites, although we are not interested in estimates
+
+
+# We are starting with a full model of random effects based on on Piepho & Ogutu (2002)
+# Fixed:
+# we are interested in a trend so we will include year as fix effect to get an estimate
+
+# Random:
+# random site intercept effect to account for the random sample of sites and correlation among all 
+# (1|Site) -years visited in the same site
+
+# random year intercept effect to account for correlation among all sites visited in the same year
+# (1|Year) - random intercept for each year 
+
+# we didn't see a lot of variation between the trends for each site
+# however to be sure we can check random site slope effect to account for variation among site-level trend lines
+# (1 + WYear|Site) - this assumes correlation between intercept and slope
+
+
+# When doing a binomial model with success rates ( in this case presence of shrub is success and absence is failure)
+# We layout the model specifying each of them 
+
+# success: Shrub_cover
+# failure: 100-Shrub_cover
+
+# (success, failure)
+
+# lets fit a binomial first:
+fit_Bin <- glmmTMB(cbind(Shrub_cover, 100-Shrub_cover) ~ WYear + 
+                     (1|Site) + 
+                     (1|Year), 
+                   data = Shrub,
+                   REML = T,                        # this is T when looking at residuals
+                   family=binomial(link='logit'))  # start with binomial
+
+summary(fit_Bin)
+
+# Lets look at the residuals using the DHARMa package
+
+testResiduals(fit_Bin, plot = T) 
+testDispersion(fit_Bin,plot = T)
+testQuantiles(fit_Bin, plot = T)
+testUniformity(fit_Bin, plot = T)
+
+# these all look like there is overdispersion
+# lets fit a beta binomial instead
+
+fit_betaBin <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + (1|Site) + (1|Year), 
+                       data = Shrub,
+                       REML = T, 
+                       family=betabinomial(link='logit'))  
+
+summary(fit_betaBin)
+
+
+# Lets look at the residuals 
+
+# When interpreting DHARMA residuals, the residuals are expected to follow a uniform distribution instead of the 
+# normal distribution, and are standardized to values between 0 and 1
+
+
+testResiduals(fit_betaBin, plot = T) 
+testDispersion(fit_betaBin,plot = T)
+testQuantiles(fit_betaBin, plot = T)
+testUniformity(fit_betaBin, plot = T)
+
+# these all look good!
+# Beta-Binomial is probably a good choice!
+
+# What if we wanted to check if there is random site slope effect to account for variation among site-level trend lines
+# (1 + WYear|Site) - this assumes correlation between intercept and slope
+
+fit_betaBin_v1 <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + 
+                            (1|Year)+
+                            (1+WYear|Site), # this means random intercept for site and slope time correlated
+                          data = Shrub,
+                          REML = T, 
+                          family=betabinomial(link='logit'))  
+
+
+#did not converge
+# check what's going on:
+summary(fit_betaBin_v1)
+# if we look at the estimates correlation between site intercept and site slope = 1
+# Overparametrization: Model is over fitted when slope and intercept are correlated, correlation = 1
+
+# we can try to fit one without the random intercept and slope correlated
+
+fit_betaBin_v2 <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + 
+                            (1|Year)+
+                            (1+WYear||Site), # double bar means random intercept for site and slope time not correlated
+                          data = Shrub,
+                          REML = T, 
+                          family=betabinomial(link='logit'))  
+
+# Let's look at the estimates:
+summary(fit_betaBin_v2)
+
+# Both these models fit_betaBin_v2 and fit_betaBin: are beta-binomial, and have random intercepts for site and year as well as trend over time
+# the difference is that fit_betaBin_v2 accounts for variation in trend for each site, but if we look at the coefficient this value is really small
+# we could probably remove the slope for Site because its so small however, we can use AIC to compare models:
+
+# To compare models we need to run them with ML
+fit_betaBin <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + (1|Site) + (1|Year), 
+                       data = Shrub,
+                       REML = F, 
+                       family=betabinomial(link='logit'))  
+
+fit_betaBin_v2 <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + 
+                            (1|Year)+
+                            (1+WYear||Site), # double bar means random intercept for site and slope time not correlated
+                          data = Shrub,
+                          REML = F, 
+                          family=betabinomial(link='logit'))  
+
+
+
+AIC(fit_betaBin, fit_betaBin_v2)
+
+# We have very similar AICs, however second model is more complex. We would continue with the most parsimonious model.
+
+# ok! lets continue with our beta-binomial with random intercept model for site and Year
+
+
+##################################################################
+##################################################################
+# Check Model Assumptions 
+##################################################################
+##################################################################
+
+# We did much of this above.  Let's examine a few more assumptions:
+
+#################################################
+# Additional residual diagnostics for final model
+# Based on Pinheiro and Bates
+################################################
+
+# Residual diagnostics
+# with REML=T for more accurate estimates
+fit_betaBin <- glmmTMB(cbind(Shrub_cover,100-Shrub_cover) ~ WYear + (1|Site) + (1|Year), 
+                       data = Shrub,
+                       REML = T, 
+                       family=betabinomial(link='logit')) 
+
+fit = fit_betaBin 
+
+# we want to see if there are any patterns in the residuals which might indicate we have missing covariates
+
+# Resids v Time
+modelDF = Shrub
+modelDF$pResid = resid(fit,type="pearson")
+modelDF$fittedMS = fitted(fit)  # ,type = "mean_subject")
+modelDF$Shrub_cover = modelDF$Shrub_cover
+
+# Plot residuals by year to look for patterns
+residByYear <- data.frame(WYear=modelDF$WYear,resid=modelDF$pResid)
+residByYear = residByYear[order(residByYear$WYear),]
+plot(residByYear$WYear,residByYear$resid,xlab="Year",ylab="Pearson residual")
+# looks pretty unform and centered around 0
+
+
+# Variance uniformity across sites? 
+boxplot(modelDF$pResid~modelDF$Site)  
+
+# Variance uniformity across years? 
+boxplot(modelDF$pResid~modelDF$WYear)
+# looks good
+
+
+# examine temporal autocorrelation in residuals
+range(table(modelDF$Site))  # all Sites visited 24 times
+Sites <- unique(modelDF$Site)
+length(Sites) # 100 sites
+
+# Plot autocorrelation plots for each site.
+# We expect our random effects structure to account for this!
+# Autocorrelation in the residuals suggests that there’s a relationship or dependency between 
+# current and past errors in the time series. 
+
+par(mfrow=c(3,3))
+for(i in 1:200) {
+  print(pacf(ts(residuals(fit)[modelDF$Site==Sites[i]]),main=Sites[i]))
+}
+dev.off()
+#...
+
+# no autocorrelation in the residuals!
+
+#################################################
+# Assess that random effects are distributed normally
+#################################################
+ranef(fit)$cond$Year
+ranef(fit)$cond$Site
+
+
+qqnorm(ranef(fit)$cond$Year[,1], main = "Year Intercept Random Effects")
+qqline(ranef(fit)$cond$Year[,1])
+
+qqnorm(ranef(fit)$cond$Site[,1], main = "Site Intercept Random Effects")
+qqline(ranef(fit)$cond$Site[,1])
+
+dev.off()
+
+
+#################################################
+# Assess that residuals are independent from 
+# levels of random effects 
+#################################################
+
+
+random_effects <- ranef(fit)
+SiteRE = data.frame(Site = rownames(random_effects$cond$Site),
+                    SiteRE = random_effects$cond$Site)
+names(SiteRE)[2] = 'SiteRE_Intercept'
+
+rownames(SiteRE)=NULL
+
+
+YearRE = data.frame(Year=rownames(ranef(fit)$cond$Year),YearRE=ranef(fit)$cond$Year)
+names(YearRE)[2] = 'YearRE'
+rownames(YearRE)=NULL
+YearRE <- tidyr::separate(data = YearRE, col = Year, into = c("Year"), sep = ":")
+
+modelDF = merge(modelDF, SiteRE)
+modelDF = merge(modelDF, YearRE)
+
+# Is the residual value correlated with the year random effect?
+cor.test_Year = cor.test(modelDF$pResid, modelDF$YearRE, method='kendall')
+print(cor.test_Year)#Some correlation between residuals and slope but very small
+# cor = 0.03837626
+# p-value = 0.00575
+
+# How about site?
+cor.test_Site = cor.test(modelDF$pResid, modelDF$SiteRE_Intercept, method='kendall')
+print(cor.test_Site) #Some correlation between residuals and slope but very small
+# cor = 0.02375734
+# p-value = 0.08252
+
+# Some significant correlation test, but the correlation is very small. 
+# We could consider other model structure, but in this simulated data set 
+# we know that these variables are independent. 
+
+#################################################################
+##################################################################
+# Biological Conclusions
+##################################################################
+##################################################################
+
+# This uses z-tests:
+# Examine fixed effects
+summary(fit)
+#positive significant trend
+
+#               Estimate  Std. Error  z value     Pr(>|z|)
+# (Intercept) 0.78371581 0.098943188 7.920867 2.358605e-15
+# WYear       0.02314495 0.005188291 4.460997 8.157938e-06
+
+# Examine whether confidence intervals contain zero for FE:
+confint(fit) # Do CIs include 0?
+
+#                           2.5 %       97.5 %   Estimate
+# (Intercept)              0.58979073 0.97764089 0.78371581
+# WYear                    0.01297609 0.03331382 0.02314495
+# Std.Dev.(Intercept)|Site 0.59961275 0.82458339 0.70315767
+# Std.Dev.(Intercept)|Year 0.07773768 0.22368498 0.13186641
+
+# Binomial and beta-binomial GLMMs model the cover proportion with a logit link function
+# trend is generated as linear on the scale of the odds of the cover probability
+# The odds is p/(1-p)
+
+# WYear
+# obtain estimate and 95%-CI of trend on the odds scale
+(exp(confint(fit)[2,])-1)[c(3,1,2)]
+
+# 0.0234% trend over time
+
+# Marginal effects plots # type="fe" accounting for fixed effect variation
+# Predicted Annual Status
+margEffects_WYear <- ggpredict(fit, terms = c("WYear"),ci.lvl = 0.95, type="fe")
+margEffects_WYear
+plot(margEffects_WYear,rawdata=FALSE,jitter=0)
 ```
 

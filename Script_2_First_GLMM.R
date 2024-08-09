@@ -22,6 +22,7 @@ path <- r'[C:\Analysis\glmm\Workshop_Aug_2024_ESA]'
 dataPath <- file.path(path, "Data_workshop")
 
 Shrub <- readRDS(file.path(dataPath, "Shrub.rds"))
+Shrub <- readRDS(here("Data_workshop","Shrub.rds"))
 
 ###############################
 # Specify and Fit the Full Model
@@ -60,6 +61,15 @@ Shrub <- readRDS(file.path(dataPath, "Shrub.rds"))
 
 # lets fit a binomial first:
 fit_Bin <- glmmTMB(cbind(Shrub$Shrub_cover, 100-Shrub$Shrub_cover) ~ WYear + 
+                     (1|Site) + 
+                     (1|Year), 
+                   data = Shrub,
+                   REML = T,                        # this is T when looking at residuals
+                   family=binomial(link='logit'))  # start with binomial
+
+summary(fit_Bin)
+
+fit_Bin <- glmmTMB(cbind(Shrub_cover, 100-Shrub_cover) ~ WYear + 
                      (1|Site) + 
                      (1|Year), 
                    data = Shrub,
